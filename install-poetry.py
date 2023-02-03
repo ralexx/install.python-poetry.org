@@ -292,7 +292,7 @@ class VirtualEnvironment:
         return self._bin_path
 
     @classmethod
-    def make(cls, target: Path) -> "VirtualEnvironment":
+    def make(cls, target: Path, use_symlinks: bool = False) -> "VirtualEnvironment":
         if not sys.executable:
             raise ValueError(
                 "Unable to determine sys.executable. Set PATH to a sane value or set it explicitly with PYTHONEXECUTABLE."
@@ -306,7 +306,17 @@ class VirtualEnvironment:
             import ensurepip  # noqa: F401
             import venv
 
-            builder = venv.EnvBuilder(clear=True, with_pip=True, symlinks=False)
+            # allow venv to use symlinks with macOS system Python
+            if (
+                use_symlinks
+                and MACOS
+                and re.match("/Applications/Xcode.app", sys.executable)
+            ):
+                _symlinks = True
+            else:
+                _symlinks = False
+
+            builder = venv.EnvBuilder(clear=True, with_pip=True, symlinks=_symlinks)
             context = builder.ensure_directories(target)
 
             if (
@@ -475,6 +485,7 @@ class Installer:
         accept_all: bool = False,
         git: Optional[str] = None,
         path: Optional[str] = None,
+        use_symlinks: bool = False,
     ) -> None:
         self._version = version
         self._preview = preview
@@ -482,6 +493,7 @@ class Installer:
         self._accept_all = accept_all
         self._git = git
         self._path = path
+        self._use_symlinks = use_symlinks
 
         self._cursor = Cursor()
         self._bin_dir = None
@@ -626,7 +638,7 @@ class Installer:
 
         try:
             self._install_comment(version, "Creating environment")
-            yield VirtualEnvironment.make(env_path)
+            yield VirtualEnvironment.make(env_path, use_symlinks=self._use_symlinks)
         except Exception as e:
             if env_path.exists():
                 self._install_comment(
@@ -898,6 +910,16 @@ def main():
             "of Poetry available online."
         ),
     )
+    parser.add_argument(
+        "--use-system-python",
+        dest="syspython",
+        action="store_true",
+        default=False,
+        help=(
+            "Have Poetry use the Python version installed by your operating system.  "
+            "Currently implemented for macOS only."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -910,6 +932,7 @@ def main():
         or not is_interactive(),
         path=args.path,
         git=args.git,
+        use_symlinks=args.syspython,
     )
 
     if args.uninstall or string_to_bool(os.getenv("POETRY_UNINSTALL", "0")):
